@@ -94,8 +94,8 @@ async function startBot() {
       const from = mek.key.remoteJid;
       const isCmd = text.startsWith(".");
 
-      // ✅ Command handling restricted to self-message
-      if (mek.key.fromMe && from === ownerNumber && isCmd) {
+      // ✅ Command handling updated to ensure .activateai works
+      if (from === ownerNumber && isCmd) {
         if (text === ".activateai") {
           aiActive = true;
           await client.sendMessage(from, { text: "🤖 AI Assistant activated. I'll start replying like your flirty funny self." });
