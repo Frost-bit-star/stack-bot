@@ -1,7 +1,7 @@
 const { session } = require("./settings");
 const {
   default: dreadedConnect,
-  useMultiFileAuthState, // ✅ Use multi file auth state
+  useMultiFileAuthState,
   DisconnectReason,
   downloadContentFromMessage,
   jidDecode,
@@ -20,11 +20,8 @@ const PORT = process.env.PORT || 3000;
 const color = (text, color) => (!color ? chalk.green(text) : chalk.keyword(color)(text));
 
 let aiActive = false;
+let ownerNumber; // ✅ dynamic owner number
 
-/**
- * ✅ AI Reply function using your provided endpoint
- * ✅ System prompt preserved exactly as you wrote it
- */
 async function aiReply(messages) {
   try {
     const systemPrompt = "You are replying as me in WhatsApp chats. Reply casually, naturally, and personally as a young, confident, funny guy. Always reply in first person as if you are me. Never mention AI, assistant, or anything robotic. Make replies feel real and authentic, with slang, jokes, emojis, and smooth compliments where relevant. Keep it short, natural, and fitting the flow of conversation. Do not sound like a chatbot or motivational speaker. Do not say 'I'm here for you' or 'let me know what's up'. Always read previous messages carefully and reply naturally to the latest one as if you are continuing the conversation seamlessly.";
@@ -49,7 +46,6 @@ async function aiReply(messages) {
 }
 
 async function startBot() {
-  // ✅ Decode your base64 session into ./session folder
   const sessionJson = Buffer.from(session, 'base64').toString('utf-8');
   const sessionFolder = './session';
   if (!fs.existsSync(sessionFolder)) fs.mkdirSync(sessionFolder);
@@ -77,6 +73,13 @@ async function startBot() {
       startBot();
     } else if (connection === "open") {
       console.log(color("🤖 WhatsApp bot connected and running!", "green"));
+
+      // ✅ Get your own number dynamically
+      ownerNumber = client.user.id;
+      console.log("✅ Owner number detected:", ownerNumber);
+
+      // ✅ Send online notification to yourself
+      client.sendMessage(ownerNumber, { text: "✅ Bot is connected and online!" });
     }
   });
 
@@ -91,8 +94,8 @@ async function startBot() {
       const from = mek.key.remoteJid;
       const isCmd = text.startsWith(".");
 
-      // ✅ Command handling
-      if (mek.key.fromMe && isCmd) {
+      // ✅ Command handling restricted to self-message
+      if (mek.key.fromMe && from === ownerNumber && isCmd) {
         if (text === ".activateai") {
           aiActive = true;
           await client.sendMessage(from, { text: "🤖 AI Assistant activated. I'll start replying like your flirty funny self." });
@@ -103,7 +106,6 @@ async function startBot() {
         return;
       }
 
-      // ✅ Auto-view statuses with random emoji reaction
       if (mek.key && mek.key.remoteJid === "status@broadcast") {
         await client.readMessages([mek.key]);
         const emojis = ['🗿','⌚️','💠','👣','🍆','💔','🤍','❤️‍🔥','💣','🧠','🦅','🌻','🧊','🛑','🧸','👑','📍','😅','🎭','🎉','😳','💯','🔥','💫','🐒','💗','❤️‍🔥','👁️','👀','🙌','🙆','🌟','💧','🦄','🟢','🎎','✅','🥱','🌚','💚','💕','😉','😒'];
@@ -112,7 +114,6 @@ async function startBot() {
         console.log('Reaction sent successfully ✅️');
       }
 
-      // ✅ AI auto-reply if activated
       if (aiActive && !mek.key.fromMe && from.endsWith("@s.whatsapp.net")) {
         const history = await client.fetchMessagesFromJid(from, 10);
         const messages = history.map(h => ({
@@ -124,7 +125,6 @@ async function startBot() {
         await client.sendMessage(from, { text: aiText });
       }
 
-      // ✅ Main command handler preserved
       try {
         require("./main")(client, mek, chatUpdate);
       } catch (e) {
