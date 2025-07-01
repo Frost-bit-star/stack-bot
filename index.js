@@ -1,4 +1,3 @@
-const { session } = require("./settings");
 const {
   default: dreadedConnect,
   useMultiFileAuthState,
@@ -21,10 +20,6 @@ const pino = require("pino");
 const fs = require("fs");
 const chalk = require("chalk");
 const axios = require("axios");
-const cheerio = require('cheerio');
-const util = require("util");
-const fetch = require('node-fetch');
-const { exec, spawn, execSync } = require("child_process");
 const express = require("express");
 
 const app = express();
@@ -33,7 +28,6 @@ const color = (text, color) => (!color ? chalk.green(text) : chalk.keyword(color
 
 let aiActive = false;
 let ownerNumber;
-const chatHistories = {}; // 🔥 stores last 5 messages per contact
 
 async function aiReply(messages) {
   try {
@@ -59,12 +53,7 @@ async function aiReply(messages) {
 }
 
 async function startBot() {
-  const sessionJson = Buffer.from(session, 'base64').toString('utf-8');
-  const sessionFolder = './session';
-  if (!fs.existsSync(sessionFolder)) fs.mkdirSync(sessionFolder);
-  fs.writeFileSync(`${sessionFolder}/creds.json`, sessionJson);
-
-  const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
+  const { state, saveCreds } = await useMultiFileAuthState('./session');
 
   const client = dreadedConnect({
     logger: pino({ level: "silent" }),
@@ -103,13 +92,8 @@ async function startBot() {
       const from = mek.key.remoteJid;
       const isCmd = text.startsWith(".");
 
-      // Fake typing indicator for every incoming message
-      await client.sendPresenceUpdate('composing', from);
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      // Command handling with ownerNumber split fix
-      if (isCmd && from.split("@")[0] === ownerNumber.split("@")[0]) {
-        console.log("Owner command received:", text);
+      // Command handling
+      if (from === ownerNumber && isCmd) {
         const command = text.trim().toLowerCase();
         if (command === ".activateai") {
           aiActive = true;
@@ -130,47 +114,29 @@ async function startBot() {
         console.log('Reaction sent successfully ✅️');
       }
 
-      // AI reply
+      // AI reply with fake typing
       if (aiActive && !mek.key.fromMe && from.endsWith("@s.whatsapp.net")) {
-        // Initialize chat history if not exist
-        if (!chatHistories[from]) chatHistories[from] = [];
-
-        // Add current user message
-        chatHistories[from].push({ role: "user", content: text });
-
-        // Keep only last 5 messages
-        if (chatHistories[from].length > 5) {
-          chatHistories[from] = chatHistories[from].slice(-5);
-        }
-
-        const aiText = await aiReply(chatHistories[from]);
-
-        // Add AI reply to history
-        chatHistories[from].push({ role: "assistant", content: aiText });
-        if (chatHistories[from].length > 5) {
-          chatHistories[from] = chatHistories[from].slice(-5);
-        }
-
-        // Fake typing before AI reply
+        // Send fake typing
         await client.sendPresenceUpdate('composing', from);
-        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        // Fetch last 5 messages
+        const history = await client.fetchMessagesFromJid(from, 5);
+        const messages = history.map(h => ({
+          role: h.key.fromMe ? "assistant" : "user",
+          content: h.message?.conversation || h.message?.extendedTextMessage?.text || ""
+        }));
+        messages.push({ role: "user", content: text });
+
+        const aiText = await aiReply(messages);
 
         await client.sendMessage(from, { text: aiText });
+
+        // Send fake pause
+        await client.sendPresenceUpdate('paused', from);
       }
 
       // ✅ Additional merged features
       try {
-        var body =
-          mtype === "conversation"
-            ? msg.conversation
-            : mtype === "imageMessage"
-            ? msg.caption
-            : mtype === "videoMessage"
-            ? msg.caption
-            : mtype === "extendedTextMessage"
-            ? msg.text
-            : "";
-
         var budy = typeof text === "string" ? text : "";
         const textL = budy.toLowerCase();
         const quotedMessage = mek.message?.extendedTextMessage?.contextInfo?.quotedMessage;
@@ -241,7 +207,7 @@ async function startBot() {
 startBot();
 
 app.get("/", (req, res) => {
-  res.send("✅ Autoview Bot with AI, status saver, message history, and typing indicator is running!");
+  res.send("✅ Autoview Bot with AI and status saver is running!");
 });
 
 app.listen(PORT, () => {
