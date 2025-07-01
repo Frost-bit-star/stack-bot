@@ -1,9 +1,9 @@
 // bot.js
 
-const sessionName = "session";
+const { session } = require("./settings"); // ✅ Import session from settings.js
 const {
   default: dreadedConnect,
-  useMultiFileAuthState,
+  useSingleFileAuthState,
   DisconnectReason,
   downloadContentFromMessage,
   jidDecode,
@@ -25,23 +25,19 @@ const color = (text, color) => (!color ? chalk.green(text) : chalk.keyword(color
 let aiActive = false;
 
 /**
- * AI Reply function using your provided endpoint
- * Updated system prompt to ensure replies remain natural, personal, and on-topic
+ * ✅ AI Reply function using your provided endpoint
+ * ✅ System prompt preserved exactly as you wrote it
  */
 async function aiReply(messages) {
   try {
     const systemPrompt = "You are replying as me in WhatsApp chats. Reply casually, naturally, and personally as a young, confident, funny guy. Always reply in first person as if you are me. Never mention AI, assistant, or anything robotic. Make replies feel real and authentic, with slang, jokes, emojis, and smooth compliments where relevant. Keep it short, natural, and fitting the flow of conversation. Do not sound like a chatbot or motivational speaker. Do not say 'I'm here for you' or 'let me know what's up'. Always read previous messages carefully and reply naturally to the latest one as if you are continuing the conversation seamlessly.";
 
-    // Combine system prompt with chat history for context
     const combinedText = systemPrompt + "\n\n" + messages.map(m => {
       return `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`;
     }).join('\n');
 
-    // Call your API via GET with URL-encoded text
     const response = await axios.get("https://api.dreaded.site/api/chatgpt", {
-      params: {
-        text: combinedText
-      }
+      params: { text: combinedText }
     });
 
     if (response.data && response.data.result && response.data.result.prompt) {
@@ -49,7 +45,6 @@ async function aiReply(messages) {
     } else {
       return "❌ Invalid response from AI API";
     }
-
   } catch (err) {
     console.log("AI API error:", err.response?.data || err.message);
     return "😂 Sorry, brain jammed for a sec. Try again!";
@@ -57,13 +52,33 @@ async function aiReply(messages) {
 }
 
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState(`./${sessionName}`);
+  // ✅ Use session from settings.js by decoding it to auth_info.json
+  const sessionJson = Buffer.from(session, 'base64').toString('utf-8');
+  fs.writeFileSync('./auth_info.json', sessionJson);
+
+  const { state, saveState } = await useSingleFileAuthState('./auth_info.json');
+
   const client = dreadedConnect({
     logger: pino({ level: "silent" }),
-    printQRInTerminal: true,
     browser: ["BacktrackAI", "Safari", "5.1.7"],
     markOnlineOnConnect: true,
     auth: state,
+  });
+
+  client.ev.on("connection.update", (update) => {
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr) {
+      console.log("📌 Scan this QR to connect:\n", qr);
+    }
+
+    if (connection === "close") {
+      const reason = lastDisconnect?.error?.output?.statusCode;
+      console.log("Connection closed, reconnecting...", reason);
+      startBot();
+    } else if (connection === "open") {
+      console.log(color("🤖 WhatsApp bot connected and running!", "green"));
+    }
   });
 
   client.ev.on("messages.upsert", async (chatUpdate) => {
@@ -77,7 +92,7 @@ async function startBot() {
       const from = mek.key.remoteJid;
       const isCmd = text.startsWith(".");
 
-      // Command handling
+      // ✅ Command handling remains unchanged
       if (mek.key.fromMe && isCmd) {
         if (text === ".activateai") {
           aiActive = true;
@@ -89,7 +104,7 @@ async function startBot() {
         return;
       }
 
-      // Auto-view statuses with random emoji reaction
+      // ✅ Auto-view statuses with random emoji reaction
       if (mek.key && mek.key.remoteJid === "status@broadcast") {
         await client.readMessages([mek.key]);
         const emojis = ['🗿','⌚️','💠','👣','🍆','💔','🤍','❤️‍🔥','💣','🧠','🦅','🌻','🧊','🛑','🧸','👑','📍','😅','🎭','🎉','😳','💯','🔥','💫','🐒','💗','❤️‍🔥','👁️','👀','🙌','🙆','🌟','💧','🦄','🟢','🎎','✅','🥱','🌚','💚','💕','😉','😒'];
@@ -98,19 +113,19 @@ async function startBot() {
         console.log('Reaction sent successfully ✅️');
       }
 
-      // AI auto-reply if activated and message is from others
+      // ✅ AI auto-reply if activated
       if (aiActive && !mek.key.fromMe && from.endsWith("@s.whatsapp.net")) {
         const history = await client.fetchMessagesFromJid(from, 10);
         const messages = history.map(h => ({
           role: h.key.fromMe ? "assistant" : "user",
           content: h.message?.conversation || h.message?.extendedTextMessage?.text || ""
         }));
-        messages.push({ role: "user", content: text }); // append latest message
+        messages.push({ role: "user", content: text });
         const aiText = await aiReply(messages);
         await client.sendMessage(from, { text: aiText });
       }
 
-      // Continue with your existing features here (example: main commands handler)
+      // ✅ Main command handler preserved
       try {
         require("./main")(client, mek, chatUpdate);
       } catch (e) {
@@ -122,23 +137,11 @@ async function startBot() {
     }
   });
 
-  client.ev.on("connection.update", (update) => {
-    const { connection, lastDisconnect } = update;
-    if (connection === "close") {
-      const reason = new Boom(lastDisconnect?.error)?.output.statusCode;
-      console.log("Connection closed, reconnecting...", reason);
-      startBot();
-    } else if (connection === "open") {
-      console.log(color("🤖 WhatsApp bot connected and running!", "green"));
-    }
-  });
-
-  client.ev.on("creds.update", saveCreds);
+  client.ev.on("creds.update", saveState);
 }
 
 startBot();
 
-// Express server routes
 app.get("/", (req, res) => {
   res.send("✅ Autoview Bot with AI is running!");
 });
