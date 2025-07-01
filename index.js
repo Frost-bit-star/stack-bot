@@ -1,9 +1,7 @@
-// bot.js
-
-const { session } = require("./settings"); // ✅ Import session from settings.js
+const { session } = require("./settings");
 const {
   default: dreadedConnect,
-  useSingleFileAuthState,
+  useMultiFileAuthState, // ✅ Use multi file auth state
   DisconnectReason,
   downloadContentFromMessage,
   jidDecode,
@@ -13,7 +11,6 @@ const {
 
 const pino = require("pino");
 const fs = require("fs");
-const path = require("path");
 const chalk = require("chalk");
 const axios = require("axios");
 const express = require("express");
@@ -52,11 +49,13 @@ async function aiReply(messages) {
 }
 
 async function startBot() {
-  // ✅ Use session from settings.js by decoding it to auth_info.json
+  // ✅ Decode your base64 session into ./session folder
   const sessionJson = Buffer.from(session, 'base64').toString('utf-8');
-  fs.writeFileSync('./auth_info.json', sessionJson);
+  const sessionFolder = './session';
+  if (!fs.existsSync(sessionFolder)) fs.mkdirSync(sessionFolder);
+  fs.writeFileSync(`${sessionFolder}/creds.json`, sessionJson);
 
-  const { state, saveState } = await useSingleFileAuthState('./auth_info.json');
+  const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
 
   const client = dreadedConnect({
     logger: pino({ level: "silent" }),
@@ -92,7 +91,7 @@ async function startBot() {
       const from = mek.key.remoteJid;
       const isCmd = text.startsWith(".");
 
-      // ✅ Command handling remains unchanged
+      // ✅ Command handling
       if (mek.key.fromMe && isCmd) {
         if (text === ".activateai") {
           aiActive = true;
@@ -137,7 +136,7 @@ async function startBot() {
     }
   });
 
-  client.ev.on("creds.update", saveState);
+  client.ev.on("creds.update", saveCreds);
 }
 
 startBot();
