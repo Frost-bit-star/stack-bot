@@ -33,6 +33,7 @@ const color = (text, color) => (!color ? chalk.green(text) : chalk.keyword(color
 
 let aiActive = false;
 let ownerNumber;
+const chatHistories = {}; // 🔥 stores last 5 messages per contact
 
 async function aiReply(messages) {
   try {
@@ -102,8 +103,13 @@ async function startBot() {
       const from = mek.key.remoteJid;
       const isCmd = text.startsWith(".");
 
-      // Command handling
-      if (from === ownerNumber && isCmd) {
+      // Fake typing indicator for every incoming message
+      await client.sendPresenceUpdate('composing', from);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // Command handling with ownerNumber split fix
+      if (isCmd && from.split("@")[0] === ownerNumber.split("@")[0]) {
+        console.log("Owner command received:", text);
         const command = text.trim().toLowerCase();
         if (command === ".activateai") {
           aiActive = true;
@@ -126,13 +132,29 @@ async function startBot() {
 
       // AI reply
       if (aiActive && !mek.key.fromMe && from.endsWith("@s.whatsapp.net")) {
-        const history = await client.fetchMessagesFromJid(from, 10);
-        const messages = history.map(h => ({
-          role: h.key.fromMe ? "assistant" : "user",
-          content: h.message?.conversation || h.message?.extendedTextMessage?.text || ""
-        }));
-        messages.push({ role: "user", content: text });
-        const aiText = await aiReply(messages);
+        // Initialize chat history if not exist
+        if (!chatHistories[from]) chatHistories[from] = [];
+
+        // Add current user message
+        chatHistories[from].push({ role: "user", content: text });
+
+        // Keep only last 5 messages
+        if (chatHistories[from].length > 5) {
+          chatHistories[from] = chatHistories[from].slice(-5);
+        }
+
+        const aiText = await aiReply(chatHistories[from]);
+
+        // Add AI reply to history
+        chatHistories[from].push({ role: "assistant", content: aiText });
+        if (chatHistories[from].length > 5) {
+          chatHistories[from] = chatHistories[from].slice(-5);
+        }
+
+        // Fake typing before AI reply
+        await client.sendPresenceUpdate('composing', from);
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
         await client.sendMessage(from, { text: aiText });
       }
 
@@ -219,7 +241,7 @@ async function startBot() {
 startBot();
 
 app.get("/", (req, res) => {
-  res.send("✅ Autoview Bot with AI and status saver is running!");
+  res.send("✅ Autoview Bot with AI, status saver, message history, and typing indicator is running!");
 });
 
 app.listen(PORT, () => {
