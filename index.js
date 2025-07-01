@@ -7,12 +7,24 @@ const {
   jidDecode,
   proto,
   getContentType,
+  BufferJSON,
+  STORIES_JID,
+  WA_DEFAULT_EPHEMERAL,
+  generateWAMessageFromContent,
+  generateWAMessageContent,
+  generateWAMessage,
+  prepareWAMessageMedia,
+  areJidsSameUser
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
 const fs = require("fs");
 const chalk = require("chalk");
 const axios = require("axios");
+const cheerio = require('cheerio');
+const util = require("util");
+const fetch = require('node-fetch');
+const { exec, spawn, execSync } = require("child_process");
 const express = require("express");
 
 const app = express();
@@ -20,7 +32,7 @@ const PORT = process.env.PORT || 3000;
 const color = (text, color) => (!color ? chalk.green(text) : chalk.keyword(color)(text));
 
 let aiActive = false;
-let ownerNumber; // ✅ dynamic owner number
+let ownerNumber;
 
 async function aiReply(messages) {
   try {
@@ -73,12 +85,8 @@ async function startBot() {
       startBot();
     } else if (connection === "open") {
       console.log(color("🤖 WhatsApp bot connected and running!", "green"));
-
-      // ✅ Get your own number dynamically
       ownerNumber = client.user.id;
       console.log("✅ Owner number detected:", ownerNumber);
-
-      // ✅ Send online notification to yourself
       client.sendMessage(ownerNumber, { text: "✅ Bot is connected and online!" });
     }
   });
@@ -94,18 +102,20 @@ async function startBot() {
       const from = mek.key.remoteJid;
       const isCmd = text.startsWith(".");
 
-      // ✅ Command handling updated to ensure .activateai works
+      // Command handling
       if (from === ownerNumber && isCmd) {
-        if (text === ".activateai") {
+        const command = text.trim().toLowerCase();
+        if (command === ".activateai") {
           aiActive = true;
           await client.sendMessage(from, { text: "🤖 AI Assistant activated. I'll start replying like your flirty funny self." });
-        } else if (text === ".deactivate") {
+        } else if (command === ".deactivate") {
           aiActive = false;
           await client.sendMessage(from, { text: "😴 AI Assistant deactivated. I'm off duty boss." });
         }
         return;
       }
 
+      // Status view auto-react
       if (mek.key && mek.key.remoteJid === "status@broadcast") {
         await client.readMessages([mek.key]);
         const emojis = ['🗿','⌚️','💠','👣','🍆','💔','🤍','❤️‍🔥','💣','🧠','🦅','🌻','🧊','🛑','🧸','👑','📍','😅','🎭','🎉','😳','💯','🔥','💫','🐒','💗','❤️‍🔥','👁️','👀','🙌','🙆','🌟','💧','🦄','🟢','🎎','✅','🥱','🌚','💚','💕','😉','😒'];
@@ -114,6 +124,7 @@ async function startBot() {
         console.log('Reaction sent successfully ✅️');
       }
 
+      // AI reply
       if (aiActive && !mek.key.fromMe && from.endsWith("@s.whatsapp.net")) {
         const history = await client.fetchMessagesFromJid(from, 10);
         const messages = history.map(h => ({
@@ -125,10 +136,76 @@ async function startBot() {
         await client.sendMessage(from, { text: aiText });
       }
 
+      // ✅ Additional merged features
       try {
-        require("./main")(client, mek, chatUpdate);
+        var body =
+          mtype === "conversation"
+            ? msg.conversation
+            : mtype === "imageMessage"
+            ? msg.caption
+            : mtype === "videoMessage"
+            ? msg.caption
+            : mtype === "extendedTextMessage"
+            ? msg.text
+            : "";
+
+        var budy = typeof text === "string" ? text : "";
+        const textL = budy.toLowerCase();
+        const quotedMessage = mek.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+
+        // Save statuses with #save
+        if (quotedMessage && textL.startsWith("#save") && mek.key.remoteJid.includes("status@broadcast")) {
+          if (quotedMessage.imageMessage) {
+            let imageCaption = quotedMessage.imageMessage.caption;
+            let imageUrl = await client.downloadAndSaveMediaMessage(quotedMessage.imageMessage);
+            client.sendMessage(ownerNumber, {
+              image: { url: imageUrl },
+              caption: imageCaption
+            });
+          }
+
+          if (quotedMessage.videoMessage) {
+            let videoCaption = quotedMessage.videoMessage.caption;
+            let videoUrl = await client.downloadAndSaveMediaMessage(quotedMessage.videoMessage);
+            client.sendMessage(ownerNumber, {
+              video: { url: videoUrl },
+              caption: videoCaption
+            });
+          }
+        }
+
+        // Auto save on "uhm|wow|nice|🙂"
+        if (/^(uhm|wow|nice|🙂)/i.test(budy) && quotedMessage) {
+          if (quotedMessage?.imageMessage) {
+            let imageCaption = quotedMessage.imageMessage.caption || "";
+            let imageUrl = await client.downloadAndSaveMediaMessage(quotedMessage.imageMessage);
+            client.sendMessage(ownerNumber, {
+              image: { url: imageUrl },
+              caption: imageCaption
+            });
+          }
+
+          if (quotedMessage?.videoMessage) {
+            let videoCaption = quotedMessage.videoMessage.caption || "";
+            let videoUrl = await client.downloadAndSaveMediaMessage(quotedMessage.videoMessage);
+            client.sendMessage(ownerNumber, {
+              video: { url: videoUrl },
+              caption: videoCaption
+            });
+          }
+
+          if (quotedMessage?.audioMessage) {
+            let audioUrl = await client.downloadAndSaveMediaMessage(quotedMessage.audioMessage);
+            client.sendMessage(ownerNumber, {
+              audio: { url: audioUrl },
+              mimetype: quotedMessage.audioMessage.mimetype,
+              ptt: quotedMessage.audioMessage.ptt || false
+            });
+          }
+        }
+
       } catch (e) {
-        console.log("Main module error:", e);
+        console.log("Main merged module error:", e);
       }
 
     } catch (err) {
@@ -142,7 +219,7 @@ async function startBot() {
 startBot();
 
 app.get("/", (req, res) => {
-  res.send("✅ Autoview Bot with AI is running!");
+  res.send("✅ Autoview Bot with AI and status saver is running!");
 });
 
 app.listen(PORT, () => {
