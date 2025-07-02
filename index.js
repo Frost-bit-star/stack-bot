@@ -22,7 +22,7 @@ const chalk = require("chalk");
 const axios = require("axios");
 const express = require("express");
 const path = require("path");
-const { session } = require("./settings");
+const { session: sessionBase64 } = require("./settings");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -30,6 +30,17 @@ const color = (text, color) => (!color ? chalk.green(text) : chalk.keyword(color
 
 let aiActive = false;
 let ownerNumber;
+
+// ✅ Decode session from base64
+let session = {};
+try {
+  const decoded = Buffer.from(sessionBase64, "base64").toString("utf-8");
+  session = JSON.parse(decoded);
+  console.log("✅ Session decoded successfully.");
+} catch (err) {
+  console.error("❌ Failed to decode session:", err);
+  process.exit(1);
+}
 
 async function aiReply(messages) {
   try {
@@ -59,7 +70,7 @@ async function startBot() {
     logger: pino({ level: "silent" }),
     browser: ["BacktrackAI", "Safari", "5.1.7"],
     markOnlineOnConnect: true,
-    auth: session, // ✅ fixed here
+    auth: session, // ✅ using decoded session object
   });
 
   client.ev.on("connection.update", (update) => {
