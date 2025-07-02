@@ -59,7 +59,7 @@ async function startBot() {
     logger: pino({ level: "silent" }),
     browser: ["BacktrackAI", "Safari", "5.1.7"],
     markOnlineOnConnect: true,
-    auth: JSON.parse(session),
+    auth: session, // ✅ fixed here
   });
 
   client.ev.on("connection.update", (update) => {
