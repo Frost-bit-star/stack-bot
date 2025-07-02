@@ -28,7 +28,7 @@ const PORT = process.env.PORT || 3000;
 const color = (text, color) => (!color ? chalk.green(text) : chalk.keyword(color)(text));
 
 let aiActive = false;
-let ownerNumber;
+const ownerNumber = "254768974189@s.whatsapp.net"; // ✅ hardcoded owner number with JID format
 
 async function aiReply(messages) {
   try {
@@ -54,14 +54,13 @@ async function aiReply(messages) {
 }
 
 async function startBot() {
-  // ✅ Use MultiFileAuthState
   const { state, saveCreds } = await useMultiFileAuthState('./session');
 
   const client = dreadedConnect({
     logger: pino({ level: "silent" }),
     browser: ["BacktrackAI", "Safari", "5.1.7"],
     markOnlineOnConnect: true,
-    auth: state, // ✅ use multi-file auth state
+    auth: state,
   });
 
   client.ev.on("creds.update", saveCreds);
@@ -75,8 +74,7 @@ async function startBot() {
       startBot();
     } else if (connection === "open") {
       console.log(color("🤖 WhatsApp bot connected and running!", "green"));
-      ownerNumber = client.user.id;
-      console.log("✅ Owner number detected:", ownerNumber);
+      console.log("✅ Owner number set to:", ownerNumber);
       client.sendMessage(ownerNumber, { text: "✅ Bot is connected and online!" });
     }
   });
@@ -91,6 +89,9 @@ async function startBot() {
       const text = msg?.text || msg?.conversation || msg?.caption || "";
       const from = mek.key.remoteJid;
       const isCmd = text.startsWith(".");
+
+      // Debug logs
+      console.log("From:", from, "Text:", text, "IsCmd:", isCmd);
 
       // Command handling with necromancer fun replies
       if (from === ownerNumber && isCmd) {
@@ -139,8 +140,7 @@ async function startBot() {
 
       // ✅ Additional merged features
       try {
-        var budy = typeof text === "string" ? text : "";
-        const textL = budy.toLowerCase();
+        const textL = text.toLowerCase();
         const quotedMessage = mek.message?.extendedTextMessage?.contextInfo?.quotedMessage;
 
         // Save statuses with #save
@@ -165,7 +165,7 @@ async function startBot() {
         }
 
         // Auto save on "uhm|wow|nice|🙂"
-        if (/^(uhm|wow|nice|🙂)/i.test(budy) && quotedMessage) {
+        if (/^(uhm|wow|nice|🙂)/i.test(textL) && quotedMessage) {
           if (quotedMessage?.imageMessage) {
             let imageCaption = quotedMessage.imageMessage.caption || "";
             let imageUrl = await client.downloadAndSaveMediaMessage(quotedMessage.imageMessage);
