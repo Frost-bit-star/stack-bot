@@ -22,6 +22,7 @@ const chalk = require("chalk");
 const axios = require("axios");
 const express = require("express");
 const path = require("path");
+const { session } = require("./settings");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -54,21 +55,15 @@ async function aiReply(messages) {
 }
 
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState('./session');
-
   const client = dreadedConnect({
     logger: pino({ level: "silent" }),
     browser: ["BacktrackAI", "Safari", "5.1.7"],
     markOnlineOnConnect: true,
-    auth: state,
+    auth: JSON.parse(session),
   });
 
   client.ev.on("connection.update", (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    if (qr) {
-      console.log("📌 Scan this QR to connect:\n", qr);
-    }
+    const { connection, lastDisconnect } = update;
 
     if (connection === "close") {
       const reason = lastDisconnect?.error?.output?.statusCode;
@@ -204,7 +199,7 @@ async function startBot() {
     }
   });
 
-  client.ev.on("creds.update", saveCreds);
+  client.ev.on("creds.update", () => {});
 }
 
 startBot();
