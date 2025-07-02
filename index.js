@@ -21,6 +21,7 @@ const fs = require("fs");
 const chalk = require("chalk");
 const axios = require("axios");
 const express = require("express");
+const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -92,15 +93,20 @@ async function startBot() {
       const from = mek.key.remoteJid;
       const isCmd = text.startsWith(".");
 
-      // Command handling
+      // Command handling with necromancer fun replies
       if (from === ownerNumber && isCmd) {
         const command = text.trim().toLowerCase();
         if (command === ".activateai") {
           aiActive = true;
-          await client.sendMessage(from, { text: "🤖 AI Assistant activated. I'll start replying like your flirty funny self." });
+          await client.sendMessage(from, {
+            image: fs.readFileSync(path.join(__dirname, "me.jpeg")),
+            caption: "☠️ Someone summons the necromancer...\n\nI am here... say the word and I will do as you command."
+          });
         } else if (command === ".deactivate") {
           aiActive = false;
-          await client.sendMessage(from, { text: "😴 AI Assistant deactivated. I'm off duty boss." });
+          await client.sendMessage(from, {
+            text: "💀 I will return to the land of the dead...\nBut if you need me, just summon me.\n\nRemember... the word is .activateai"
+          });
         }
         return;
       }
@@ -114,12 +120,10 @@ async function startBot() {
         console.log('Reaction sent successfully ✅️');
       }
 
-      // AI reply with fake typing
+      // AI reply with fake typing (necromancer active)
       if (aiActive && !mek.key.fromMe && from.endsWith("@s.whatsapp.net")) {
-        // Send fake typing
         await client.sendPresenceUpdate('composing', from);
 
-        // Fetch last 5 messages
         const history = await client.fetchMessagesFromJid(from, 5);
         const messages = history.map(h => ({
           role: h.key.fromMe ? "assistant" : "user",
@@ -131,7 +135,6 @@ async function startBot() {
 
         await client.sendMessage(from, { text: aiText });
 
-        // Send fake pause
         await client.sendPresenceUpdate('paused', from);
       }
 
