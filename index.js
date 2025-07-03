@@ -2,18 +2,8 @@ const {
   default: dreadedConnect,
   useMultiFileAuthState,
   DisconnectReason,
-  downloadContentFromMessage,
-  jidDecode,
-  proto,
   getContentType,
-  BufferJSON,
-  STORIES_JID,
-  WA_DEFAULT_EPHEMERAL,
-  generateWAMessageFromContent,
-  generateWAMessageContent,
-  generateWAMessage,
-  prepareWAMessageMedia,
-  areJidsSameUser
+  jidDecode
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
@@ -22,35 +12,18 @@ const chalk = require("chalk");
 const axios = require("axios");
 const express = require("express");
 const path = require("path");
-const { Boom } = require("@hapi/boom");
-const { session } = require("./settings");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const color = (text, color) => (!color ? chalk.green(text) : chalk.keyword(color)(text));
+const color = (text, c) => (!c ? chalk.green(text) : chalk.keyword(c)(text));
 
 let aiActive = false;
 const ownerNumber = "254768974189@s.whatsapp.net";
-
-let notifiedOnline = false; // ✅ prevent repeated online notifications
-
-async function initializeSession() {
-  const credsPath = path.join(__dirname, "session", "creds.json");
-  try {
-    const decoded = Buffer.from(session, "base64").toString("utf-8");
-    if (!fs.existsSync(credsPath)) {
-      console.log("📡 writing session creds.json from settings.js...");
-      fs.mkdirSync(path.dirname(credsPath), { recursive: true });
-      fs.writeFileSync(credsPath, decoded, "utf8");
-    }
-  } catch (e) {
-    console.log("❌ Session initialization error:", e);
-  }
-}
+let notifiedOnline = false;
 
 async function aiReply(messages) {
   try {
-    const systemPrompt = "You are replying as me in WhatsApp chats. Reply casually, naturally, and personally as a young, confident, funny guy. Always reply in first person as if you are me. Never mention AI, assistant, or anything robotic. Make replies feel real and authentic, with slang, jokes, emojis, and smooth compliments where relevant. Keep it short, natural, and fitting the flow of conversation. Do not sound like a chatbot or motivational speaker. Do not say 'I'm here for you' or 'let me know what's up'. Always read previous messages carefully and reply naturally to the latest one as if you are continuing the conversation seamlessly.";
+    const systemPrompt = "You are replying as me in WhatsApp chats. Reply casually, naturally, and personally as a young, confident, funny guy. Always reply in first person as if you are me. Never mention AI, assistant, or anything robotic. Make replies feel real and authentic, with slang, jokes, emojis, and smooth compliments where relevant. Keep it short, natural, and fitting the flow of conversation.";
 
     const combinedText = systemPrompt + "\n\n" + messages.map(m => {
       return `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`;
@@ -60,11 +33,7 @@ async function aiReply(messages) {
       params: { text: combinedText }
     });
 
-    if (response.data && response.data.result && response.data.result.prompt) {
-      return response.data.result.prompt;
-    } else {
-      return "❌ Invalid response from AI API";
-    }
+    return response.data?.result?.prompt || "😂 Sorry, brain jammed for a sec. Try again!";
   } catch (err) {
     console.log("AI API error:", err.response?.data || err.message);
     return "😂 Sorry, brain jammed for a sec. Try again!";
@@ -72,41 +41,42 @@ async function aiReply(messages) {
 }
 
 async function startBot() {
-  await initializeSession();
-
   const { state, saveCreds } = await useMultiFileAuthState('./session');
 
   const client = dreadedConnect({
     logger: pino({ level: "silent" }),
-    browser: ["NecromancerBot", "DarkSafari", "6.6.6"],
+    browser: ["NecromancerBot", "Safari", "5.1.7"],
     markOnlineOnConnect: true,
     auth: state,
   });
 
   client.ev.on("creds.update", saveCreds);
 
-  client.ev.on("connection.update", (update) => {
+  client.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect } = update;
 
     if (connection === "close") {
-      const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
+      const reason = lastDisconnect?.error?.output?.statusCode;
       console.log("Connection closed, reconnecting...", reason);
-      if (reason === DisconnectReason.badSession) {
-        console.log("Bad session, deleting and exiting.");
-        fs.rmSync('./session', { recursive: true, force: true });
-        process.exit(1);
-      } else {
+      if (reason !== DisconnectReason.loggedOut) {
         startBot();
+      } else {
+        console.log("❌ You have been logged out. Delete session and reconnect.");
       }
     } else if (connection === "open") {
       console.log(color("💀 Necromancer WhatsApp bot resurrected and running!", "magenta"));
       console.log("✅ Owner number set to:", ownerNumber);
+
       if (!notifiedOnline) {
-        client.sendMessage(ownerNumber, {
-          image: fs.readFileSync(path.join(__dirname, "me.jpeg")),
-          caption: "☠️ The Necromancer has risen...\n\nYour bot is connected and the darkness listens to your commands."
-        });
-        notifiedOnline = true;
+        try {
+          await client.sendMessage(ownerNumber, {
+            image: fs.readFileSync(path.join(__dirname, "me.jpeg")),
+            caption: "☠️ The Necromancer has risen...\n\nYour bot is connected and the darkness listens to your commands."
+          });
+          notifiedOnline = true;
+        } catch (err) {
+          console.log("❌ Failed to send online image:", err.message);
+        }
       }
     }
   });
@@ -122,10 +92,9 @@ async function startBot() {
       const from = mek.key.remoteJid;
       const isCmd = text.startsWith(".");
 
-      // Debug logs
       console.log("From:", from, "Text:", text, "IsCmd:", isCmd);
 
-      // Command handling with necromancer replies
+      // Owner commands
       if (from === ownerNumber && isCmd) {
         const command = text.trim().toLowerCase();
         if (command === ".activateai") {
@@ -144,15 +113,16 @@ async function startBot() {
       }
 
       // Status view auto-react
-      if (mek.key && mek.key.remoteJid === "status@broadcast") {
+      if (from === "status@broadcast") {
         await client.readMessages([mek.key]);
         const emojis = ['🗿','⌚️','💠','👣','🍆','💔','🤍','❤️‍🔥','💣','🧠','🦅','🌻','🧊','🛑','🧸','👑','📍','😅','🎭','🎉','😳','💯','🔥','💫','🐒','💗','❤️‍🔥','👁️','👀','🙌','🙆','🌟','💧','🦄','🟢','🎎','✅','🥱','🌚','💚','💕','😉','😒'];
         const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-        await client.sendMessage(mek.key.remoteJid, { react: { text: randomEmoji, key: mek.key } });
+        await client.sendMessage(from, { react: { text: randomEmoji, key: mek.key } });
         console.log('Reaction sent successfully ✅️');
+        return;
       }
 
-      // AI reply with fake typing (necromancer active)
+      // AI replies
       if (aiActive && !mek.key.fromMe && from.endsWith("@s.whatsapp.net")) {
         await client.sendPresenceUpdate('composing', from);
 
@@ -170,66 +140,6 @@ async function startBot() {
         await client.sendPresenceUpdate('paused', from);
       }
 
-      // ✅ Additional merged features
-      try {
-        const textL = text.toLowerCase();
-        const quotedMessage = mek.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-
-        // Save statuses with #save
-        if (quotedMessage && textL.startsWith("#save") && mek.key.remoteJid.includes("status@broadcast")) {
-          if (quotedMessage.imageMessage) {
-            let imageCaption = quotedMessage.imageMessage.caption;
-            let imageUrl = await client.downloadAndSaveMediaMessage(quotedMessage.imageMessage);
-            client.sendMessage(ownerNumber, {
-              image: { url: imageUrl },
-              caption: imageCaption
-            });
-          }
-
-          if (quotedMessage.videoMessage) {
-            let videoCaption = quotedMessage.videoMessage.caption;
-            let videoUrl = await client.downloadAndSaveMediaMessage(quotedMessage.videoMessage);
-            client.sendMessage(ownerNumber, {
-              video: { url: videoUrl },
-              caption: videoCaption
-            });
-          }
-        }
-
-        // Auto save on "uhm|wow|nice|🙂"
-        if (/^(uhm|wow|nice|🙂)/i.test(textL) && quotedMessage) {
-          if (quotedMessage?.imageMessage) {
-            let imageCaption = quotedMessage.imageMessage.caption || "";
-            let imageUrl = await client.downloadAndSaveMediaMessage(quotedMessage.imageMessage);
-            client.sendMessage(ownerNumber, {
-              image: { url: imageUrl },
-              caption: imageCaption
-            });
-          }
-
-          if (quotedMessage?.videoMessage) {
-            let videoCaption = quotedMessage.videoMessage.caption || "";
-            let videoUrl = await client.downloadAndSaveMediaMessage(quotedMessage.videoMessage);
-            client.sendMessage(ownerNumber, {
-              video: { url: videoUrl },
-              caption: videoCaption
-            });
-          }
-
-          if (quotedMessage?.audioMessage) {
-            let audioUrl = await client.downloadAndSaveMediaMessage(quotedMessage.audioMessage);
-            client.sendMessage(ownerNumber, {
-              audio: { url: audioUrl },
-              mimetype: quotedMessage.audioMessage.mimetype,
-              ptt: quotedMessage.audioMessage.ptt || false
-            });
-          }
-        }
-
-      } catch (e) {
-        console.log("Main merged module error:", e);
-      }
-
     } catch (err) {
       console.log("messages.upsert error:", err);
     }
@@ -239,7 +149,7 @@ async function startBot() {
 startBot();
 
 app.get("/", (req, res) => {
-  res.send("💀 Necromancer Bot with AI and status saver is alive and waiting in the shadows.");
+  res.send("💀 Necromancer WhatsApp Bot is alive and running!");
 });
 
 app.listen(PORT, () => {
