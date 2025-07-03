@@ -22,16 +22,18 @@ const chalk = require("chalk");
 const axios = require("axios");
 const express = require("express");
 const path = require("path");
-const { session } = require("./settings"); // ✅ import session from settings.js
+const { Boom } = require("@hapi/boom");
+const { session } = require("./settings");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const color = (text, color) => (!color ? chalk.green(text) : chalk.keyword(color)(text));
 
 let aiActive = false;
-const ownerNumber = "254768974189@s.whatsapp.net"; // ✅ hardcoded owner number with JID format
+const ownerNumber = "254768974189@s.whatsapp.net";
 
-// ✅ Added initializeSession function (no other logic changed)
+let notifiedOnline = false; // ✅ prevent repeated online notifications
+
 async function initializeSession() {
   const credsPath = path.join(__dirname, "session", "creds.json");
   try {
@@ -70,13 +72,13 @@ async function aiReply(messages) {
 }
 
 async function startBot() {
-  await initializeSession(); // ✅ initialize session before starting bot
+  await initializeSession();
 
   const { state, saveCreds } = await useMultiFileAuthState('./session');
 
   const client = dreadedConnect({
     logger: pino({ level: "silent" }),
-    browser: ["BacktrackAI", "Safari", "5.1.7"],
+    browser: ["NecromancerBot", "DarkSafari", "6.6.6"],
     markOnlineOnConnect: true,
     auth: state,
   });
@@ -87,13 +89,25 @@ async function startBot() {
     const { connection, lastDisconnect } = update;
 
     if (connection === "close") {
-      const reason = lastDisconnect?.error?.output?.statusCode;
+      const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
       console.log("Connection closed, reconnecting...", reason);
-      startBot();
+      if (reason === DisconnectReason.badSession) {
+        console.log("Bad session, deleting and exiting.");
+        fs.rmSync('./session', { recursive: true, force: true });
+        process.exit(1);
+      } else {
+        startBot();
+      }
     } else if (connection === "open") {
-      console.log(color("🤖 WhatsApp bot connected and running!", "green"));
+      console.log(color("💀 Necromancer WhatsApp bot resurrected and running!", "magenta"));
       console.log("✅ Owner number set to:", ownerNumber);
-      client.sendMessage(ownerNumber, { text: "✅ Bot is connected and online!" });
+      if (!notifiedOnline) {
+        client.sendMessage(ownerNumber, {
+          image: fs.readFileSync(path.join(__dirname, "me.jpeg")),
+          caption: "☠️ The Necromancer has risen...\n\nYour bot is connected and the darkness listens to your commands."
+        });
+        notifiedOnline = true;
+      }
     }
   });
 
@@ -111,7 +125,7 @@ async function startBot() {
       // Debug logs
       console.log("From:", from, "Text:", text, "IsCmd:", isCmd);
 
-      // Command handling with necromancer fun replies
+      // Command handling with necromancer replies
       if (from === ownerNumber && isCmd) {
         const command = text.trim().toLowerCase();
         if (command === ".activateai") {
@@ -225,7 +239,7 @@ async function startBot() {
 startBot();
 
 app.get("/", (req, res) => {
-  res.send("✅ Autoview Bot with AI and status saver is running!");
+  res.send("💀 Necromancer Bot with AI and status saver is alive and waiting in the shadows.");
 });
 
 app.listen(PORT, () => {
