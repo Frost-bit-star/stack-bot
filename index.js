@@ -22,6 +22,7 @@ const chalk = require("chalk");
 const axios = require("axios");
 const express = require("express");
 const path = require("path");
+const { session } = require("./settings"); // ✅ import session from settings.js
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -29,6 +30,21 @@ const color = (text, color) => (!color ? chalk.green(text) : chalk.keyword(color
 
 let aiActive = false;
 const ownerNumber = "254768974189@s.whatsapp.net"; // ✅ hardcoded owner number with JID format
+
+// ✅ Added initializeSession function (no other logic changed)
+async function initializeSession() {
+  const credsPath = path.join(__dirname, "session", "creds.json");
+  try {
+    const decoded = Buffer.from(session, "base64").toString("utf-8");
+    if (!fs.existsSync(credsPath)) {
+      console.log("📡 writing session creds.json from settings.js...");
+      fs.mkdirSync(path.dirname(credsPath), { recursive: true });
+      fs.writeFileSync(credsPath, decoded, "utf8");
+    }
+  } catch (e) {
+    console.log("❌ Session initialization error:", e);
+  }
+}
 
 async function aiReply(messages) {
   try {
@@ -54,6 +70,8 @@ async function aiReply(messages) {
 }
 
 async function startBot() {
+  await initializeSession(); // ✅ initialize session before starting bot
+
   const { state, saveCreds } = await useMultiFileAuthState('./session');
 
   const client = dreadedConnect({
