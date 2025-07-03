@@ -2,8 +2,18 @@ const {
   default: dreadedConnect,
   useMultiFileAuthState,
   DisconnectReason,
+  downloadContentFromMessage,
+  jidDecode,
+  proto,
   getContentType,
-  jidDecode
+  BufferJSON,
+  STORIES_JID,
+  WA_DEFAULT_EPHEMERAL,
+  generateWAMessageFromContent,
+  generateWAMessageContent,
+  generateWAMessage,
+  prepareWAMessageMedia,
+  areJidsSameUser
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
@@ -12,18 +22,29 @@ const chalk = require("chalk");
 const axios = require("axios");
 const express = require("express");
 const path = require("path");
+const { session } = require("./settings");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const color = (text, c) => (!c ? chalk.green(text) : chalk.keyword(c)(text));
+const PORT = process.env.PORT || 10000;
+const color = (text, color) => (!color ? chalk.green(text) : chalk.keyword(color)(text));
 
 let aiActive = false;
-const ownerNumber = "254768974189@s.whatsapp.net";
-let notifiedOnline = false;
+const ownerNumber = "254768974189@s.whatsapp.net"; // ✅ your owner number
+
+// Write creds.json on every start from settings.js
+const credsPath = path.join(__dirname, "session", "creds.json");
+try {
+  const decoded = Buffer.from(session, "base64").toString("utf-8");
+  fs.mkdirSync(path.dirname(credsPath), { recursive: true });
+  fs.writeFileSync(credsPath, decoded, "utf8");
+  console.log("📡 writing session creds.json from settings.js...");
+} catch (e) {
+  console.error("❌ Failed to write session creds:", e);
+}
 
 async function aiReply(messages) {
   try {
-    const systemPrompt = "You are replying as me in WhatsApp chats. Reply casually, naturally, and personally as a young, confident, funny guy. Always reply in first person as if you are me. Never mention AI, assistant, or anything robotic. Make replies feel real and authentic, with slang, jokes, emojis, and smooth compliments where relevant. Keep it short, natural, and fitting the flow of conversation.";
+    const systemPrompt = "You are replying as me in WhatsApp chats. Reply casually, naturally, and personally as a young, confident, funny guy. Always reply in first person as if you are me. Never mention AI, assistant, or anything robotic. Make replies feel real and authentic, with slang, jokes, emojis, and smooth compliments where relevant. Keep it short, natural, and fitting the flow of conversation. Do not sound like a chatbot or motivational speaker. Do not say 'I'm here for you' or 'let me know what's up'. Always read previous messages carefully and reply naturally to the latest one as if you are continuing the conversation seamlessly.";
 
     const combinedText = systemPrompt + "\n\n" + messages.map(m => {
       return `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`;
@@ -33,7 +54,11 @@ async function aiReply(messages) {
       params: { text: combinedText }
     });
 
-    return response.data?.result?.prompt || "😂 Sorry, brain jammed for a sec. Try again!";
+    if (response.data && response.data.result && response.data.result.prompt) {
+      return response.data.result.prompt;
+    } else {
+      return "❌ Invalid response from AI API";
+    }
   } catch (err) {
     console.log("AI API error:", err.response?.data || err.message);
     return "😂 Sorry, brain jammed for a sec. Try again!";
@@ -45,7 +70,7 @@ async function startBot() {
 
   const client = dreadedConnect({
     logger: pino({ level: "silent" }),
-    browser: ["NecromancerBot", "Safari", "5.1.7"],
+    browser: ["NecromancerBot", "Chrome", "1.0.0"],
     markOnlineOnConnect: true,
     auth: state,
   });
@@ -58,26 +83,24 @@ async function startBot() {
     if (connection === "close") {
       const reason = lastDisconnect?.error?.output?.statusCode;
       console.log("Connection closed, reconnecting...", reason);
-      if (reason !== DisconnectReason.loggedOut) {
-        startBot();
-      } else {
-        console.log("❌ You have been logged out. Delete session and reconnect.");
-      }
-    } else if (connection === "open") {
+      setTimeout(() => startBot(), 5000); // delay to prevent crash loop
+    }
+
+    if (connection === "open") {
       console.log(color("💀 Necromancer WhatsApp bot resurrected and running!", "magenta"));
       console.log("✅ Owner number set to:", ownerNumber);
 
-      if (!notifiedOnline) {
+      // Wait 3 seconds for full readiness
+      setTimeout(async () => {
         try {
           await client.sendMessage(ownerNumber, {
             image: fs.readFileSync(path.join(__dirname, "me.jpeg")),
-            caption: "☠️ The Necromancer has risen...\n\nYour bot is connected and the darkness listens to your commands."
+            caption: "☠️ The Necromancer has risen...\n\nYour bot is connected and the darkness listens to your commands.\n\n⚔️ Would you like to summon the Necromancer now? Send .activateai to awaken me."
           });
-          notifiedOnline = true;
         } catch (err) {
-          console.log("❌ Failed to send online image:", err.message);
+          console.log("❌ Failed to send necromancer online message:", err.message);
         }
-      }
+      }, 3000);
     }
   });
 
@@ -94,35 +117,34 @@ async function startBot() {
 
       console.log("From:", from, "Text:", text, "IsCmd:", isCmd);
 
-      // Owner commands
+      // Command handling
       if (from === ownerNumber && isCmd) {
         const command = text.trim().toLowerCase();
         if (command === ".activateai") {
           aiActive = true;
           await client.sendMessage(from, {
             image: fs.readFileSync(path.join(__dirname, "me.jpeg")),
-            caption: "☠️ Someone summons the necromancer...\n\nI am here... say the word and I will do as you command."
+            caption: "🔮 The Necromancer is awake...\nSpeak your will, my master."
           });
         } else if (command === ".deactivate") {
           aiActive = false;
           await client.sendMessage(from, {
-            text: "💀 I will return to the land of the dead...\nBut if you need me, just summon me.\n\nRemember... the word is .activateai"
+            text: "💀 The Necromancer returns to shadows...\nSummon me anytime with .activateai."
           });
         }
         return;
       }
 
       // Status view auto-react
-      if (from === "status@broadcast") {
+      if (mek.key && mek.key.remoteJid === "status@broadcast") {
         await client.readMessages([mek.key]);
-        const emojis = ['🗿','⌚️','💠','👣','🍆','💔','🤍','❤️‍🔥','💣','🧠','🦅','🌻','🧊','🛑','🧸','👑','📍','😅','🎭','🎉','😳','💯','🔥','💫','🐒','💗','❤️‍🔥','👁️','👀','🙌','🙆','🌟','💧','🦄','🟢','🎎','✅','🥱','🌚','💚','💕','😉','😒'];
+        const emojis = ['🗿','💠','💀','🔥','👑','⚔️','🧠','💫','🌙','⚡','🌑','🧊','📿','🕯️','🦂','🐍','🦇'];
         const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-        await client.sendMessage(from, { react: { text: randomEmoji, key: mek.key } });
+        await client.sendMessage(mek.key.remoteJid, { react: { text: randomEmoji, key: mek.key } });
         console.log('Reaction sent successfully ✅️');
-        return;
       }
 
-      // AI replies
+      // AI reply
       if (aiActive && !mek.key.fromMe && from.endsWith("@s.whatsapp.net")) {
         await client.sendPresenceUpdate('composing', from);
 
@@ -149,9 +171,18 @@ async function startBot() {
 startBot();
 
 app.get("/", (req, res) => {
-  res.send("💀 Necromancer WhatsApp Bot is alive and running!");
+  res.send("💀 Necromancer WhatsApp bot is running and awaiting commands!");
 });
 
 app.listen(PORT, () => {
   console.log(`🚀 Express server running on port ${PORT}`);
+});
+
+// Global error handlers to prevent crash
+process.on('unhandledRejection', (reason, p) => {
+  console.log('🔥 Unhandled Rejection at:', p, 'reason:', reason);
+});
+
+process.on('uncaughtException', err => {
+  console.log('🔥 Uncaught Exception thrown:', err);
 });
