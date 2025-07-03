@@ -29,7 +29,7 @@ const PORT = process.env.PORT || 3000;
 const color = (text, color) => (!color ? chalk.green(text) : chalk.keyword(color)(text));
 
 let aiActive = false;
-const ownerNumber = "255786441628@s.whatsapp.net"; // ✅ hardcoded owner number with JID format
+const ownerNumber = "254768974189@s.whatsapp.net"; // ✅ hardcoded owner number with JID format
 
 // ✅ Added initializeSession function (no other logic changed)
 async function initializeSession() {
