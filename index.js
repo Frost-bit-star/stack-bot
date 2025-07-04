@@ -1,73 +1,64 @@
-const {
-  default: dreadedConnect,
-  useMultiFileAuthState,
-  DisconnectReason,
-  downloadContentFromMessage,
-  jidDecode,
-  proto,
-  getContentType,
-  BufferJSON,
-  STORIES_JID,
-  WA_DEFAULT_EPHEMERAL,
-  generateWAMessageFromContent,
-  generateWAMessageContent,
-  generateWAMessage,
-  prepareWAMessageMedia,
-  areJidsSameUser
-} = require("@whiskeysockets/baileys");
+// index.js
 
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, jidDecode, getContentType, proto } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const fs = require("fs");
 const chalk = require("chalk");
 const axios = require("axios");
 const express = require("express");
 const path = require("path");
-const sqlite3 = require("better-sqlite3");
+const sqlite3 = require("sqlite3").verbose();
 
 const { session } = require("./settings");
 const gitBackup = require("./gitbackup");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
-const color = (text, color) => (!color ? chalk.green(text) : chalk.keyword(color)(text));
+const ownerNumber = "254768974189@s.whatsapp.net";
 
-const ownerNumber = "254768974189@s.whatsapp.net"; // ✅ your owner number
-
-// Write creds.json on every start from settings.js
 const credsPath = path.join(__dirname, "session", "creds.json");
-try {
-  const decoded = Buffer.from(session, "base64").toString("utf-8");
-  fs.mkdirSync(path.dirname(credsPath), { recursive: true });
-  fs.writeFileSync(credsPath, decoded, "utf8");
-  console.log("📡 writing session creds.json from settings.js...");
-} catch (e) {
-  console.error("❌ Failed to write session creds:", e);
+
+function color(text, c) {
+  return c ? chalk.keyword(c)(text) : chalk.green(text);
 }
 
-// --- Initialize SQLite DB ---
-const dbFile = path.resolve(__dirname, "data.db");
-const db = new sqlite3(dbFile);
+// === Write creds.json from settings.js if valid ===
+try {
+  const decoded = Buffer.from(session, "base64").toString("utf-8");
+  if (!decoded.includes('"noiseKey"') || !decoded.includes('"me"')) {
+    throw new Error("Invalid session base64 data in settings.js");
+  }
+  fs.mkdirSync(path.dirname(credsPath), { recursive: true });
+  fs.writeFileSync(credsPath, decoded, "utf8");
+  console.log("✅ Session creds.json written from settings.js");
+} catch (e) {
+  console.error("❌ Failed to write valid session creds.json:", e.message);
+}
 
-// Create settings table if not exists
-db.prepare(`
-  CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT
-  )
-`).run();
+// === Initialize SQLite DB (async) ===
+const db = new sqlite3.Database(path.join(__dirname, "data.db"), (err) => {
+  if (err) console.error("DB open error:", err.message);
+  else console.log("✅ SQLite database initialized");
+});
 
-// Helper functions to get/set AI status in DB
-function getAIStatus() {
-  const row = db.prepare(`SELECT value FROM settings WHERE key = 'aiActive'`).get();
-  return row ? row.value === "true" : false;
+db.serialize(() => {
+  db.run(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`);
+});
+
+// === Helper functions to get/set AI status ===
+function getAIStatus(callback) {
+  db.get(`SELECT value FROM settings WHERE key = 'aiActive'`, (err, row) => {
+    if (err) return callback(false);
+    callback(row ? row.value === "true" : false);
+  });
 }
 
 function setAIStatus(status) {
-  db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('aiActive', ?)`).run(String(status));
+  db.run(`INSERT OR REPLACE INTO settings (key, value) VALUES ('aiActive', ?)`, [String(status)]);
   backupData();
 }
 
-// Backup data by copying files and pushing to git via gitbackup.js
+// === Backup data to Git ===
 async function backupData() {
   try {
     gitBackup.copyFiles();
@@ -77,7 +68,7 @@ async function backupData() {
   }
 }
 
-// On startup: clone/pull backup repo and restore data.db and session files
+// === Restore backup files before bot starts ===
 (async () => {
   try {
     await gitBackup.gitInit();
@@ -85,14 +76,13 @@ async function backupData() {
 
     const backupDb = path.resolve(__dirname, "backup", "data.db");
     if (fs.existsSync(backupDb)) {
-      fs.copyFileSync(backupDb, dbFile);
+      fs.copyFileSync(backupDb, path.join(__dirname, "data.db"));
       console.log("✅ Restored data.db from backup");
     }
 
     const backupSession = path.resolve(__dirname, "backup", "session");
-    const localSession = path.resolve(__dirname, "session");
     if (fs.existsSync(backupSession)) {
-      fs.cpSync(backupSession, localSession, { recursive: true, force: true });
+      fs.cpSync(backupSession, path.join(__dirname, "session"), { recursive: true, force: true });
       console.log("✅ Restored session from backup");
     }
   } catch (e) {
@@ -100,9 +90,7 @@ async function backupData() {
   }
 })();
 
-// Initialize aiActive from DB
-let aiActive = getAIStatus();
-
+// === AI reply function with your original prompt ===
 async function aiReply(messages) {
   try {
     const systemPrompt = "You are replying as me in WhatsApp chats. Reply casually, naturally, and personally as a young, confident, funny guy. Always reply in first person as if you are me. Never mention AI, assistant, or anything robotic. Make replies feel real and authentic, with slang, jokes, emojis, and smooth compliments where relevant. Keep it short, natural, and fitting the flow of conversation. Do not sound like a chatbot or motivational speaker. Do not say 'I'm here for you' or 'let me know what's up'. Always read previous messages carefully and reply naturally to the latest one as if you are continuing the conversation seamlessly.";
@@ -126,13 +114,13 @@ async function aiReply(messages) {
   }
 }
 
+// === Start WhatsApp bot ===
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('./session');
 
-  const client = dreadedConnect({
+  const client = makeWASocket({
     logger: pino({ level: "silent" }),
     browser: ["NecromancerBot", "Chrome", "1.0.0"],
-    markOnlineOnConnect: true,
     auth: state,
   });
 
@@ -143,25 +131,26 @@ async function startBot() {
 
     if (connection === "close") {
       const reason = lastDisconnect?.error?.output?.statusCode;
-      console.log("Connection closed, reconnecting...", reason);
-      setTimeout(() => startBot(), 5000); // delay to prevent crash loop
+      console.log("Connection closed:", reason);
+
+      if ([DisconnectReason.badSession, DisconnectReason.connectionReplaced, DisconnectReason.loggedOut].includes(reason)) {
+        console.log("❌ Invalid session or replaced. Exiting...");
+        process.exit();
+      } else {
+        console.log("🔄 Reconnecting in 5s...");
+        setTimeout(() => startBot(), 5000);
+      }
     }
 
     if (connection === "open") {
-      console.log(color("💀 Necromancer WhatsApp bot resurrected and running!", "magenta"));
-      console.log("✅ Owner number set to:", ownerNumber);
-
-      // Wait 3 seconds for full readiness
-      setTimeout(async () => {
-        try {
-          await client.sendMessage(ownerNumber, {
-            image: fs.readFileSync(path.join(__dirname, "me.jpeg")),
-            caption: "☠️ The Necromancer has risen...\n\nYour bot is connected and the darkness listens to your commands.\n\n⚔️ Would you like to summon the Necromancer now? Send .activateai to awaken me."
-          });
-        } catch (err) {
-          console.log("❌ Failed to send necromancer online message:", err.message);
-        }
-      }, 3000);
+      console.log(color("💀 Necromancer WhatsApp bot resurrected!", "magenta"));
+      try {
+        await client.sendMessage(ownerNumber, {
+          text: "☠️ The Necromancer has risen. Awaiting your dark commands."
+        });
+      } catch (err) {
+        console.log("❌ Failed to notify owner:", err.message);
+      }
     }
   });
 
@@ -174,65 +163,51 @@ async function startBot() {
       const msg = mek.message[mtype];
       const text = msg?.text || msg?.conversation || msg?.caption || "";
       const from = mek.key.remoteJid;
-      const isCmd = text.startsWith(".");
 
-      console.log("From:", from, "Text:", text, "IsCmd:", isCmd);
+      console.log("From:", from, "Text:", text);
 
-      // Command handling
-      if (from === ownerNumber && isCmd) {
+      // Commands
+      if (from === ownerNumber && text.startsWith(".")) {
         const command = text.trim().toLowerCase();
         if (command === ".activateai") {
-          aiActive = true;
           setAIStatus(true);
-          await client.sendMessage(from, {
-            image: fs.readFileSync(path.join(__dirname, "me.jpeg")),
-            caption: "🔮 The Necromancer is awake...\nSpeak your will, my master."
-          });
+          await client.sendMessage(from, { text: "🔮 The Necromancer AI is awake." });
         } else if (command === ".deactivate") {
-          aiActive = false;
           setAIStatus(false);
-          await client.sendMessage(from, {
-            text: "💀 The Necromancer returns to shadows...\nSummon me anytime with .activateai."
-          });
+          await client.sendMessage(from, { text: "💀 The Necromancer AI returns to shadows." });
         }
         return;
       }
 
-      // Status view auto-react
-      if (mek.key && mek.key.remoteJid === "status@broadcast") {
-        await client.readMessages([mek.key]);
-        const emojis = ['🗿','💠','💀','🔥','👑','⚔️','🧠','💫','🌙','⚡','🌑','🧊','📿','🕯️','🦂','🐍','🦇'];
-        const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-        await client.sendMessage(mek.key.remoteJid, { react: { text: randomEmoji, key: mek.key } });
-        console.log('Reaction sent successfully ✅️');
-      }
-
       // AI reply
-      if (aiActive && !mek.key.fromMe && from.endsWith("@s.whatsapp.net")) {
-        await client.sendPresenceUpdate('composing', from);
+      getAIStatus(async (active) => {
+        if (active && !mek.key.fromMe && from.endsWith("@s.whatsapp.net")) {
+          await client.sendPresenceUpdate('composing', from);
 
-        const history = await client.fetchMessagesFromJid(from, 5);
-        const messages = history.map(h => ({
-          role: h.key.fromMe ? "assistant" : "user",
-          content: h.message?.conversation || h.message?.extendedTextMessage?.text || ""
-        }));
-        messages.push({ role: "user", content: text });
+          const history = await client.fetchMessagesFromJid(from, 5);
+          const messages = history.map(h => ({
+            role: h.key.fromMe ? "assistant" : "user",
+            content: h.message?.conversation || h.message?.extendedTextMessage?.text || ""
+          }));
+          messages.push({ role: "user", content: text });
 
-        const aiText = await aiReply(messages);
+          const aiText = await aiReply(messages);
 
-        await client.sendMessage(from, { text: aiText });
+          await client.sendMessage(from, { text: aiText });
 
-        await client.sendPresenceUpdate('paused', from);
-      }
+          await client.sendPresenceUpdate('paused', from);
+        }
+      });
 
     } catch (err) {
-      console.log("messages.upsert error:", err);
+      console.error("messages.upsert error:", err);
     }
   });
 }
 
 startBot();
 
+// === Express endpoint ===
 app.get("/", (req, res) => {
   res.send("💀 Necromancer WhatsApp bot is running and awaiting commands!");
 });
@@ -241,11 +216,10 @@ app.listen(PORT, () => {
   console.log(`🚀 Express server running on port ${PORT}`);
 });
 
-// Global error handlers to prevent crash
+// === Global error handlers ===
 process.on('unhandledRejection', (reason, p) => {
   console.log('🔥 Unhandled Rejection at:', p, 'reason:', reason);
 });
-
 process.on('uncaughtException', err => {
   console.log('🔥 Uncaught Exception thrown:', err);
 });
