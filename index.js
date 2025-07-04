@@ -1,19 +1,19 @@
-const {  
-  default: dreadedConnect,  
-  useMultiFileAuthState,  
-  DisconnectReason,  
-  downloadContentFromMessage,  
-  jidDecode,  
-  proto,  
-  getContentType,  
-  BufferJSON,  
-  STORIES_JID,  
-  WA_DEFAULT_EPHEMERAL,  
-  generateWAMessageFromContent,  
-  generateWAMessageContent,  
-  generateWAMessage,  
-  prepareWAMessageMedia,  
-  areJidsSameUser  
+const {
+  default: dreadedConnect,
+  useMultiFileAuthState,
+  DisconnectReason,
+  downloadContentFromMessage,
+  jidDecode,
+  proto,
+  getContentType,
+  BufferJSON,
+  STORIES_JID,
+  WA_DEFAULT_EPHEMERAL,
+  generateWAMessageFromContent,
+  generateWAMessageContent,
+  generateWAMessage,
+  prepareWAMessageMedia,
+  areJidsSameUser
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
@@ -23,9 +23,6 @@ const axios = require("axios");
 const express = require("express");
 const path = require("path");
 const { session } = require("./settings");
-const { gitInit, gitPull, gitPush, copyFiles } = require("./gitbackup");
-
-require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -34,35 +31,27 @@ const color = (text, color) => (!color ? chalk.green(text) : chalk.keyword(color
 let aiActive = false;
 const ownerNumber = "254768974189@s.whatsapp.net"; // ✅ your owner number
 
-// INIT GIT BACKUP REPO ON STARTUP
-gitInit();
-gitPull();
-
-// Write creds.json on first start from settings.js if not exists
+// Write creds.json on every start from settings.js
 const credsPath = path.join(__dirname, "session", "creds.json");
-if (!fs.existsSync(credsPath)) {
-  try {
-    const decoded = Buffer.from(session, "base64").toString("utf-8");
-    fs.mkdirSync(path.dirname(credsPath), { recursive: true });
-    fs.writeFileSync(credsPath, decoded, "utf8");
-    console.log("📡 writing session creds.json from settings.js...");
-  } catch (e) {
-    console.error("❌ Failed to write session creds:", e);
-  }
+try {
+  const decoded = Buffer.from(session, "base64").toString("utf-8");
+  fs.mkdirSync(path.dirname(credsPath), { recursive: true });
+  fs.writeFileSync(credsPath, decoded, "utf8");
+  console.log("📡 writing session creds.json from settings.js...");
+} catch (e) {
+  console.error("❌ Failed to write session creds:", e);
 }
 
 async function aiReply(messages) {
   try {
     const systemPrompt = "You are replying as me in WhatsApp chats. Reply casually, naturally, and personally as a young, confident, funny guy. Always reply in first person as if you are me. Never mention AI, assistant, or anything robotic. Make replies feel real and authentic, with slang, jokes, emojis, and smooth compliments where relevant. Keep it short, natural, and fitting the flow of conversation. Do not sound like a chatbot or motivational speaker. Do not say 'I'm here for you' or 'let me know what's up'. Always read previous messages carefully and reply naturally to the latest one as if you are continuing the conversation seamlessly.";
 
-    const conversationChain = messages.slice(-5).map(m => {
+    const combinedText = systemPrompt + "\n\n" + messages.map(m => {
       return `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`;
     }).join('\n');
 
-    const fullPrompt = `${systemPrompt}\n\nConversation:\n${conversationChain}`;
-
     const response = await axios.get("https://api.dreaded.site/api/chatgpt", {
-      params: { text: fullPrompt }
+      params: { text: combinedText }
     });
 
     if (response.data && response.data.result && response.data.result.prompt) {
@@ -86,11 +75,7 @@ async function startBot() {
     auth: state,
   });
 
-  client.ev.on("creds.update", async () => {
-    await saveCreds();
-    copyFiles();
-    gitPush();
-  });
+  client.ev.on("creds.update", saveCreds);
 
   client.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect } = update;
@@ -98,16 +83,14 @@ async function startBot() {
     if (connection === "close") {
       const reason = lastDisconnect?.error?.output?.statusCode;
       console.log("Connection closed, reconnecting...", reason);
-      setTimeout(() => startBot(), 5000);
+      setTimeout(() => startBot(), 5000); // delay to prevent crash loop
     }
 
     if (connection === "open") {
       console.log(color("💀 Necromancer WhatsApp bot resurrected and running!", "magenta"));
       console.log("✅ Owner number set to:", ownerNumber);
 
-      copyFiles();
-      gitPush();
-
+      // Wait 3 seconds for full readiness
       setTimeout(async () => {
         try {
           await client.sendMessage(ownerNumber, {
@@ -134,7 +117,7 @@ async function startBot() {
 
       console.log("From:", from, "Text:", text, "IsCmd:", isCmd);
 
-      // Owner commands
+      // Command handling
       if (from === ownerNumber && isCmd) {
         const command = text.trim().toLowerCase();
         if (command === ".activateai") {
@@ -148,10 +131,6 @@ async function startBot() {
           await client.sendMessage(from, {
             text: "💀 The Necromancer returns to shadows...\nSummon me anytime with .activateai."
           });
-        } else if (command === ".backup") {
-          copyFiles();
-          gitPush();
-          await client.sendMessage(from, { text: "✅ Manual backup completed and pushed to GitHub." });
         }
         return;
       }
@@ -179,6 +158,7 @@ async function startBot() {
         const aiText = await aiReply(messages);
 
         await client.sendMessage(from, { text: aiText });
+
         await client.sendPresenceUpdate('paused', from);
       }
 
@@ -190,7 +170,6 @@ async function startBot() {
 
 startBot();
 
-// Express server for Render or Railway
 app.get("/", (req, res) => {
   res.send("💀 Necromancer WhatsApp bot is running and awaiting commands!");
 });
@@ -199,7 +178,7 @@ app.listen(PORT, () => {
   console.log(`🚀 Express server running on port ${PORT}`);
 });
 
-// Global error handlers
+// Global error handlers to prevent crash
 process.on('unhandledRejection', (reason, p) => {
   console.log('🔥 Unhandled Rejection at:', p, 'reason:', reason);
 });
@@ -207,9 +186,3 @@ process.on('unhandledRejection', (reason, p) => {
 process.on('uncaughtException', err => {
   console.log('🔥 Uncaught Exception thrown:', err);
 });
-
-// Backup every 2 minutes
-setInterval(() => {
-  copyFiles();
-  gitPush();
-}, 2 * 60 * 1000);
