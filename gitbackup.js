@@ -62,7 +62,11 @@ function gitPull() {
 }
 
 async function gitPush() {
-  const commitMsg = await generateCommitMessage();
+  let commitMsg = await generateCommitMessage();
+
+  // ✅ Strip surrounding quotes to prevent pathspec errors
+  commitMsg = commitMsg.replace(/^["'](.+(?=["']$))["']$/, '$1');
+
   try {
     // ✅ Ensure Git username and email are set before commit
     execSync(`git -C ${REPO_DIR} config user.name "Frost-bit-star"`, { stdio: "inherit" });
