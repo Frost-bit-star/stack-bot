@@ -22,13 +22,15 @@ const chalk = require("chalk");
 const axios = require("axios");
 const express = require("express");
 const path = require("path");
+const sqlite3 = require("better-sqlite3");
+
 const { session } = require("./settings");
+const gitBackup = require("./gitbackup");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 const color = (text, color) => (!color ? chalk.green(text) : chalk.keyword(color)(text));
 
-let aiActive = false;
 const ownerNumber = "254768974189@s.whatsapp.net"; // ✅ your owner number
 
 // Write creds.json on every start from settings.js
@@ -41,6 +43,65 @@ try {
 } catch (e) {
   console.error("❌ Failed to write session creds:", e);
 }
+
+// --- Initialize SQLite DB ---
+const dbFile = path.resolve(__dirname, "data.db");
+const db = new sqlite3(dbFile);
+
+// Create settings table if not exists
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  )
+`).run();
+
+// Helper functions to get/set AI status in DB
+function getAIStatus() {
+  const row = db.prepare(`SELECT value FROM settings WHERE key = 'aiActive'`).get();
+  return row ? row.value === "true" : false;
+}
+
+function setAIStatus(status) {
+  db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('aiActive', ?)`).run(String(status));
+  backupData();
+}
+
+// Backup data by copying files and pushing to git via gitbackup.js
+async function backupData() {
+  try {
+    gitBackup.copyFiles();
+    await gitBackup.gitPush();
+  } catch (e) {
+    console.error("❌ Backup data error:", e);
+  }
+}
+
+// On startup: clone/pull backup repo and restore data.db and session files
+(async () => {
+  try {
+    await gitBackup.gitInit();
+    await gitBackup.gitPull();
+
+    const backupDb = path.resolve(__dirname, "backup", "data.db");
+    if (fs.existsSync(backupDb)) {
+      fs.copyFileSync(backupDb, dbFile);
+      console.log("✅ Restored data.db from backup");
+    }
+
+    const backupSession = path.resolve(__dirname, "backup", "session");
+    const localSession = path.resolve(__dirname, "session");
+    if (fs.existsSync(backupSession)) {
+      fs.cpSync(backupSession, localSession, { recursive: true, force: true });
+      console.log("✅ Restored session from backup");
+    }
+  } catch (e) {
+    console.error("❌ Backup initialization error:", e);
+  }
+})();
+
+// Initialize aiActive from DB
+let aiActive = getAIStatus();
 
 async function aiReply(messages) {
   try {
@@ -122,12 +183,14 @@ async function startBot() {
         const command = text.trim().toLowerCase();
         if (command === ".activateai") {
           aiActive = true;
+          setAIStatus(true);
           await client.sendMessage(from, {
             image: fs.readFileSync(path.join(__dirname, "me.jpeg")),
             caption: "🔮 The Necromancer is awake...\nSpeak your will, my master."
           });
         } else if (command === ".deactivate") {
           aiActive = false;
+          setAIStatus(false);
           await client.sendMessage(from, {
             text: "💀 The Necromancer returns to shadows...\nSummon me anytime with .activateai."
           });

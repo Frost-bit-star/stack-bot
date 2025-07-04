@@ -1,13 +1,14 @@
 {
-  "name": "dreaded-autoview",
-  "version": "2.0.0",
-  "description": "WhatsApp Multi Device Bot",
+  "name": "necromancer-whatsapp-bot",
+  "version": "2.1.0",
+  "description": "Necromancer WhatsApp Multi Device Bot with AI replies, auto-view, and Git backups.",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "backup": "node gitbackup.js"
   },
-  "author": "Fortunatus/yusril",
+  "author": "stackmorgan",
   "license": "MIT",
   "dependencies": {
     "@whiskeysockets/baileys": "git+https://github.com/Fortunatusmokaya/Baileys.git",
@@ -20,17 +21,18 @@
     "express": "^4.18.2",
     "figlet": "^1.5.2",
     "file-type": "^16.5.3",
+    "form-data": "^4.0.0",
     "lodash": "^4.17.21",
     "node-fetch": "^2.6.1",
     "pino": "^7.0.5",
-    "form-data": "^4.0.0"
+    "sqlite3": "^5.1.6"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Fortunatusmokaya/dreaded-autoview.git"
+    "url": "git+https://github.com/Fortunatusmokaya/necromancer-whatsapp-bot.git"
   },
   "bugs": {
-    "url": "https://github.com/Fortunatusmokaya/dreaded-autoview/issues"
+    "url": "https://github.com/Fortunatusmokaya/necromancer-whatsapp-bot/issues"
   },
-  "homepage": "https://github.com/Fortunatusmokaya/dreaded-autoview#readme"
+  "homepage": "https://github.com/Fortunatusmokaya/necromancer-whatsapp-bot#readme"
 }
