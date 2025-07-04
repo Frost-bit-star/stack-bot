@@ -9,31 +9,60 @@ const express = require("express");
 const path = require("path");
 const sqlite3 = require("sqlite3").verbose();
 
+require("dotenv").config();
 const { session } = require("./settings");
 const gitBackup = require("./gitbackup");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 const ownerNumber = "254768974189@s.whatsapp.net";
-
 const credsPath = path.join(__dirname, "session", "creds.json");
 
 function color(text, c) {
   return c ? chalk.keyword(c)(text) : chalk.green(text);
 }
 
-// === Write creds.json from settings.js if valid ===
-try {
-  const decoded = Buffer.from(session, "base64").toString("utf-8");
-  if (!decoded.includes('"noiseKey"') || !decoded.includes('"me"')) {
-    throw new Error("Invalid session base64 data in settings.js");
+// === Restore backup files before bot starts ===
+(async () => {
+  try {
+    await gitBackup.gitInit();
+    await gitBackup.gitPull();
+
+    const backupDb = path.resolve(__dirname, "backup", "data.db");
+    if (fs.existsSync(backupDb)) {
+      fs.copyFileSync(backupDb, path.join(__dirname, "data.db"));
+      console.log("✅ Restored data.db from backup");
+    }
+
+    const backupSession = path.resolve(__dirname, "backup", "session");
+    if (fs.existsSync(backupSession)) {
+      fs.cpSync(backupSession, path.join(__dirname, "session"), { recursive: true, force: true });
+      console.log("✅ Restored session from backup");
+    }
+
+    // === Write creds.json from settings.js only if no existing creds.json ===
+    if (!fs.existsSync(credsPath)) {
+      try {
+        const decoded = Buffer.from(session, "base64").toString("utf-8");
+        if (!decoded.includes('"noiseKey"') || !decoded.includes('"me"')) {
+          throw new Error("Invalid session base64 data in settings.js");
+        }
+        fs.mkdirSync(path.dirname(credsPath), { recursive: true });
+        fs.writeFileSync(credsPath, decoded, "utf8");
+        console.log("✅ Session creds.json written from settings.js");
+      } catch (e) {
+        console.error("❌ Failed to write valid session creds.json:", e.message);
+      }
+    } else {
+      console.log("✅ Existing creds.json found. Skipping overwrite.");
+    }
+
+    startBot();
+
+  } catch (e) {
+    console.error("❌ Backup initialization error:", e);
   }
-  fs.mkdirSync(path.dirname(credsPath), { recursive: true });
-  fs.writeFileSync(credsPath, decoded, "utf8");
-  console.log("✅ Session creds.json written from settings.js");
-} catch (e) {
-  console.error("❌ Failed to write valid session creds.json:", e.message);
-}
+})();
 
 // === Initialize SQLite DB (async) ===
 const db = new sqlite3.Database(path.join(__dirname, "data.db"), (err) => {
@@ -67,28 +96,6 @@ async function backupData() {
     console.error("❌ Backup data error:", e);
   }
 }
-
-// === Restore backup files before bot starts ===
-(async () => {
-  try {
-    await gitBackup.gitInit();
-    await gitBackup.gitPull();
-
-    const backupDb = path.resolve(__dirname, "backup", "data.db");
-    if (fs.existsSync(backupDb)) {
-      fs.copyFileSync(backupDb, path.join(__dirname, "data.db"));
-      console.log("✅ Restored data.db from backup");
-    }
-
-    const backupSession = path.resolve(__dirname, "backup", "session");
-    if (fs.existsSync(backupSession)) {
-      fs.cpSync(backupSession, path.join(__dirname, "session"), { recursive: true, force: true });
-      console.log("✅ Restored session from backup");
-    }
-  } catch (e) {
-    console.error("❌ Backup initialization error:", e);
-  }
-})();
 
 // === AI reply function with your original prompt ===
 async function aiReply(messages) {
@@ -204,8 +211,6 @@ async function startBot() {
     }
   });
 }
-
-startBot();
 
 // === Express endpoint ===
 app.get("/", (req, res) => {
