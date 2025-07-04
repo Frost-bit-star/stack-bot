@@ -16,16 +16,20 @@ const REPO_URL = `https://${GITHUB_TOKEN}@github.com/Frost-bit-star/Necromancer-
 
 async function generateCommitMessage() {
   try {
-    const prompt = "Write a short, dark, necromancer-themed git commit message about saving backup or resurrecting data.";
+    const prompt = "Write a very short, two-word, dark necromancer-themed git commit message about saving backup or resurrecting data. Only output the two words.";
     const response = await axios.get("https://api.dreaded.site/api/chatgpt", { params: { text: prompt } });
+
     if (response.data && response.data.result && response.data.result.prompt) {
-      return response.data.result.prompt;
+      const msg = response.data.result.prompt.trim();
+      // ✅ Force it to two words max
+      const twoWords = msg.split(/\s+/).slice(0,2).join(' ');
+      return twoWords;
     } else {
-      return "Necromancer backup update";
+      return "Necro Update";
     }
   } catch (err) {
     console.log("❌ Failed to generate AI commit message:", err.message);
-    return "Necromancer backup update";
+    return "Necro Update";
   }
 }
 
