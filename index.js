@@ -1,25 +1,17 @@
-// index.js
-
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, proto, getContentType, jidDecode } = require("@whiskeysockets/baileys");
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const { Boom } = require("@hapi/boom");
 const fs = require("fs");
 const path = require("path");
-const chalk = require("chalk");
 const express = require("express");
-const cors = require("cors");
 const axios = require("axios");
-
 const { session } = require("./settings");
 
 const app = express();
-app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 const sessionName = "session";
-
-const color = (text, c) => (chalk[c] ? chalk[c](text) : chalk.green(text));
 
 async function initializeSession() {
   const credsPath = path.join(__dirname, "session", "creds.json");
@@ -85,7 +77,7 @@ async function startBot() {
       else if (reason === DisconnectReason.connectionReplaced || reason === DisconnectReason.loggedOut) process.exit();
       else startBot();
     } else if (connection === "open") {
-      console.log(color("✅ Bot connected successfully!", "green"));
+      console.log("✅ Bot connected successfully!");
       await client.sendMessage(client.user.id, { text: "Hello, your bot is connected and running!" });
     }
   });
